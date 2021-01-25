@@ -1,0 +1,1278 @@
+---
+title: "Count Bat"
+subtitle: 'Site Name: `r params$SiteName`'
+author: 'Author: `r params$Author`' 
+date: '`r strftime(Sys.time())`' #included time so have way of id-ing data in master. If ever want just date add: , after () , format = "%d/%m/%Y"
+geometry: margin=1.5cm
+#header-includes:
+#- \usepackage{titling}
+#- \pretitle{\begin{center}\LARGE\includegraphics[width=12cm]{screenshot.png}\\[\bigskipamount]}
+#- \posttitle{\end{center}}
+output: 
+  rmarkdown::pdf_document:
+  includes: 
+    fig_caption: yes 
+#note did have the following hashed lines but was getting pandoc error 99, so tried without and suddenly worked again. Not sure if something else is wrong without it so until know for sure am leaving the lines here hashed out. - I think this has stopped it saving the PDF, just opens it.
+#includes:
+  #in_header: my_header.tex
+params: 
+  n: NA
+  m: NA
+  g: NA
+  t: NA
+  s: NA
+  Author: author
+  SiteName: sitename
+  Email: NA
+  Source: NA
+  SurveyDate: NA
+  Latitude: NA
+  Longitude: NA
+  Species: NA
+  SpeciesConfirmationMethod: NA
+  TotalCount: NA
+  StructureType: NA
+  PrimaryCategory: NA
+  Sensitivity: NA
+  Assignment: NA
+  County: NA
+  Region: NA
+  Country: NA
+  Notes: NA
+  No.of.exits: NA
+  Cloud.cover: NA
+  Wind.strength: NA
+  Rainfall: NA
+  Temperature: NA
+  EmergenceTime: NA
+  Number.of.observers: NA
+  Duration: NA
+---
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, comment = NULL, fig.pos = 'h')
+
+#NOTE FINAL BIT OF CODE SHOULD BE RESAVING NEWMASTER AS MASTER AGAIN SO PROFORMA IS ADDED TO MASTER FILE READY TO BEGIN AGAIN WITH NEXT PROFORMA!
+
+#on 23Sept2020 I tidied the code and deleted things I didn't think I needed anymore, if anything isn't working, go back to code from 27Aug2020 in 'oldstuff' folder and go through to find what was removed.
+
+#note when next run the code need to see if the graph order has changed
+
+```
+Your save selection for this data was: `r params$s`
+```{r libraries}
+
+library(rsconnect)
+library(rmarkdown)
+library(ggplot2)
+library(knitr)
+library(pander)
+library(plyr)
+library(rcompanion)
+library(tidyr)
+library(lubridate)
+library(ggforce)
+library(reshape2) #graphs
+library(dplyr) #data wrangling (except percentiles)
+library(magrittr) #piping
+library(tidyverse)
+library(rdrop2)
+library(lattice)
+library(patchwork) #putting graphs side by side, works with ggplot
+library(ggrepel) #trying to label the plots that don't currently work this way
+
+#Uhash when testing file
+#drop_auth(rdstoken = "droptoken.rds")
+#proforma <- read.csv("proforma.csv", header = TRUE)
+#master <- drop_read_csv("roosts/master.csv", header = TRUE)
+#geofilter <- "No Limit" #other options are: "100km" "200km"
+#timefilter <- "No Limit" #other option is: "+/- 1 month from survey date"
+#email <- "info@themammalsociety.org"
+#save <- "I have uploaded before, do NOT save to database"
+#timestamp <- "25/11/2020"
+
+```
+
+
+```{r}
+#creating a proforma
+Source <- params$Source
+SurveyDate <- params$SurveyDate
+Lat <- params$Latitude
+Long <- params$Longitude
+Species <- params$Species
+SpeciesConfirmationMethod <- params$SpeciesConfirmationMethod
+TotalCount <- params$TotalCount
+StructureType <- params$StructureType
+PrimaryCategory <- params$PrimaryCategory
+Sensitivity <- params$Sensitivity
+Assignment <- params$Assignment
+County <- params$County
+Region <- params$Region
+Country <- params$Country
+Notes <- params$Notes
+No.of.exits <- params$No.of.exits
+Cloud.cover <- params$Cloud.cover
+Wind.strength <- params$Wind.strength
+Rainfall <- params$Rainfall
+Temperature <- params$Temperature
+EmergenceTime <- params$EmergenceTime
+Number.of.observers <- params$Number.of.observers
+Duration <- params$Duration
+
+proforma <- data.frame(Source, SurveyDate, Lat, Long, Species, SpeciesConfirmationMethod, TotalCount,
+                       StructureType, PrimaryCategory, Sensitivity, Assignment, County, Region, Country, 
+                       Notes, No.of.exits, Cloud.cover, Wind.strength, Rainfall, Temperature, EmergenceTime,
+                       Number.of.observers, Duration)
+
+#Unhash when running from server
+proforma <- params$n #once new form in place and upload taken out, delete this line
+master <- params$m
+proforma$email <- params$email 
+geofilter <- params$g
+timefilter <- params$t
+email <- params$Email
+save <- params$s
+timestamp <- '`r strftime(Sys.time())`'
+
+#when master resaves to dropbox it adds an extra column so this just takes it back out again straight away
+master <- master %>%
+  select(!X)
+
+if (email == "") {verifyemail <- error_time
+} else {verifyemail <- email}
+
+#Create separate columns for day, month and year for proforma
+proforma2 <- proforma
+  #dplyr::filter(proforma$SurveyDate != "")
+proforma2$SurveyDate <- lubridate::dmy(proforma2$SurveyDate) #tells it that date in a2 is formatted dmy not ymd
+proforma3 <- proforma2 %>%
+  dplyr::mutate(day = lubridate::day(SurveyDate), 
+                month = lubridate::month(SurveyDate), 
+                year = lubridate::year(SurveyDate))
+proforma <- proforma3
+
+proforma$Email <- email
+proforma$Timestamp <- timestamp
+
+if (save == "Please Select") {newmaster <- error_time
+} else if (save == "I have not uploaded this data before, please save to database") {
+  newmaster <- rbind(master, proforma)
+    #move original master to a holding folder
+drop_move(from_path = "roosts/master.csv", to_path = "holding/master.csv")
+
+#write new master into dropbox and then move into roosts folder - having issues trying to write straight into it
+write.csv(newmaster, file = "master.csv")
+drop_upload("master.csv")
+drop_move(from_path = "master.csv", to_path = "roosts/master.csv")
+
+#delete the master copy in the holding folder
+drop_delete(path = "holding/master.csv")
+
+} else if (save == "I have uploaded before, do NOT save to database") {
+  newmaster <- master
+}
+
+# specify order for the species to be listed in
+master$StructureType <-  factor(master$StructureType,levels=c("Dwelling house", "Building", "Large Building",
+                                                       "Church", "Fortifications", "Barn or outbuilding",
+                                                       "Bridge", "Bat Box", "Tree", "Other", "Unknown" ))
+
+#take rows with blanks out for report but keeps them in the actual master file
+
+reportmaster <- master %>% #if it was newmaster it would have the proforma data in it
+  filter(TotalCount > 0)
+
+ reportmaster$month <- as.factor(reportmaster$month)
+
+#filter so only using rows that are the same species as the proforma
+ species <- filter(reportmaster, Species == proforma$Species)
+ 
+ proforma$month <- as.numeric(proforma$month)
+ 
+ #HERE NEED TO ADD CONDITIONS BASED ON GEORGRAPHIC AND TIME RANGES
+ 
+ #Create the options
+ 
+ #need to know what the month of survey is
+ surveymonth <- proforma$month
+ premonth <- surveymonth -1
+ postmonth <- surveymonth +1
+
+proforma$Email <- email
+proforma$Timestamp <- Sys.time()
+
+#Bind the files together
+newmaster <- rbind(master, proforma)
+   
+species2 <- species %>%
+  mutate(geofilter = geofilter) %>%
+    mutate(timefilter = timefilter)
+
+option1 <- species2
+
+option2 <- species2 %>%
+   filter(month == surveymonth | month == premonth | month == postmonth)
+ 
+ option3 <- species2 %>%
+   filter(County == proforma$County) #this option is running on the assumption that lat and lons 00. are approx
+ #e.g. 50. is 100 km, 51 is a separate 100km
+ 
+ option4 <- species2 %>%
+   filter(County == proforma$County) %>%
+   filter(month == surveymonth | month == premonth | month == postmonth )
+ 
+ option5 <- species2 %>%
+   filter(Country == proforma$Country)
+ 
+  option6 <- species2 %>%
+   filter(Country == proforma$Country) %>%
+   filter(month == surveymonth | month == premonth | month == postmonth)
+  
+  
+ #assign the option
+if (geofilter == "No Limit" & timefilter == "No Limit") {
+  Test1 <- option1
+} else if (geofilter == "No Limit" & timefilter == "+/- 1 month from survey date") {
+  Test1 <- option2
+} else if (geofilter == "County" & timefilter == "No Limit") {
+  Test1 <- option3
+} else if (geofilter == "County" & timefilter == "+/- 1 month from survey date") {
+  Test1 <- option4
+} else if (geofilter == "Country" & timefilter == "No Limit") {
+  Test1 <- option5
+} else if (geofilter == "Country" & timefilter == "+/- 1 month from survey date") {
+  Test1 <- option6
+}
+ 
+  #make a gridref column that ties lat and long together so location can be grouped later
+ proforma <- unite(proforma, gridref, c(Lat, Long), remove=FALSE)
+ species <- unite(species, gridref, c(Lat, Long), remove=FALSE)
+ 
+ #need to sort something out for if people enter more than one row of data: highest per year and then median across years
+ 
+#for graphs with months, make a column with months as text so easier to read on graphs for both proforma and master
+proforma$month <- as.factor(proforma$month)
+if (proforma$month == 1) {promonthtype <- "Jan"
+}else if (proforma$month == 2) {promonthtype <- "Feb"
+}else if (proforma$month == 3) {promonthtype <- "Mar"
+}else if (proforma$month == 4) {promonthtype <- "Apr"
+}else if (proforma$month == 5) {promonthtype <- "May"
+}else if (proforma$month == 6) {promonthtype <- "Jun"
+}else if (proforma$month == 7) {promonthtype <- "Jul"
+}else if (proforma$month == 8) {promonthtype <- "Aug"
+}else if (proforma$month == 9) {promonthtype <- "Sep"
+}else if (proforma$month == 10) {promonthtype <- "Oct"
+}else if (proforma$month == 11) {promonthtype <- "Nov"
+}else if (proforma$month == 12) {promonthtype <- "Dec"}
+proforma$monthtype <- promonthtype
+
+month <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+monthtype <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+monthdf <- data.frame(month, monthtype)
+monthdf$month <- as.factor(monthdf$month)
+newdf <- left_join(species, monthdf, "month")
+species <- newdf
+
+```
+# Summary
+
+A total count of **`r proforma$TotalCount`** ***`r proforma$Species`*** were found at a **`r proforma$StructureType`** roost on **`r proforma$SurveyDate`** in **`r proforma$County`, `r proforma$Region`, `r proforma$Country`**
+
+# Section 1: Roost Count Data
+This section uses the roost count of each ***`r proforma$Species`*** record in the database. If the same location was recorded more than once, the highest total count for each year was taken and then the median across those years was used. This is the same for the subsets of breeding and structure type data.
+
+The subset takes into account the breeding times:
+
+* If you selected "Prebreeding" in the Assignment column, your data will be compared to counts from May and June
+* If you selected "Postbreeding" in the Assignment column, your data will be compared to counts from July and August. 
+
+Boxplots are used to visualise data. For all boxplots in the report:
+
+* The lower box line is the lower quartile, the bottom 25% of data lie below this line
+* The top line of the box is the upper quartile, the top  25% of data lie above this line
+* The median is the horizontal black line within the box
+* Black dots are outliers
+* The red dot shows your roost count
+```{r}
+### General set up for tables and graphs in report ###
+
+### FOR ALL DATA ###
+#need to take duplicate data out of 'total' used. Take highest count per year and median across years.
+subsetalldata <- species %>%
+  dplyr::group_by(gridref, Species, year) %>%
+  dplyr::summarise(max = max(TotalCount))
+
+subsetalldatamedian <- subsetalldata %>%
+  dplyr::group_by(gridref, Species) %>%
+  dplyr::summarise(median = median(max))
+
+mediansubset <- subsetalldatamedian #now this is ready to use in graphs etc.
+
+### PREDBREEDING SUBSET ###
+#filter so only months May - June 
+prebreeding <- species %>%
+ filter(month == 5 | month == 6) #could also add: | Assignment == "Prebreeding")
+
+#Want peak count within year and median count across years
+#get highest count for each year
+prebreedingmax <- prebreeding %>%
+  dplyr::group_by(gridref, Species, year) %>%
+  dplyr::summarise(max = max(TotalCount))
+
+#take the median count for each location - if this stops working, probably because only one obs for prebreedingmax, last time seemed to be linked to the master saved on dropbox - if you replace this then it seems to work again.
+prebreedingmedian <- prebreedingmax %>%
+  dplyr::group_by(gridref, Species) %>%
+  dplyr::summarise(median = median(max))
+
+### POSTBREEDING SUBSET ###
+#filter so only July to August
+postbreeding <- species %>%
+  filter(month == 7 | month == 8 ) #could also add: | Assignment == "Postbreeding")
+
+postbreedingmax <- postbreeding %>%
+  dplyr::group_by(gridref, Species, year) %>%
+  dplyr::summarise(max = max(TotalCount))
+
+postbreedingmedian <- postbreedingmax %>%
+  dplyr::group_by(gridref, Species) %>%
+  dplyr::summarise(median = median(max))
+
+```
+
+
+
+
+```{r fig.width=9, fig.height=9, fig.cap="A boxplot of where your roost count sits in relation to all those in the database (left) and a subset based on Assignment (right) Your data is shown as the red dot."}
+
+#Graph 1: Natterer's all roost count by month (x-axis=month, y-axis=count)
+#Subset master to have SurveyDate, Year, Month, Day and TotalCount
+#Proforma also needs a column called median so you can plot the point, this column needs to be the same as TotalCount
+proforma$median <- proforma$TotalCount
+
+alldatatotalcount <- subset(species, select = c(TotalCount, year, month, day))
+
+mediansubset$refrange <- nrow(mediansubset)
+
+maxforlabel1 <- max(mediansubset$median)
+
+reflabel1 <- mediansubset %>%
+  filter(median == maxforlabel1)
+
+plot1a <- ggplot(mediansubset, aes(x="", y=median))+geom_boxplot()+
+  scale_y_continuous() + #(breaks=seq(0,400,100)) +
+  geom_point(
+    data=proforma,
+    aes(x="", y=median), 
+    color="red", size=3
+  )+
+      # stat_summary(fun = max, fun.max = length,
+       #        geom = "text", aes(label = ..ymax..), vjust = -1) +
+    theme_classic()+
+  theme(axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12))+
+    labs(x = "All Roosts",
+         y = "Bat Total Count") +
+    geom_label_repel(
+  data = reflabel1,   
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 1,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel1$refrange
+)
+
+if (proforma$Assignment == "Prebreeding") {
+  maxlabel2def <- prebreedingmedian
+} else if (proforma$Assignment == "Postbreeding") {
+  maxlabel2def <- postbreedingmedian
+}
+
+maxlabel2def$refrange <- nrow(maxlabel2def)
+
+maxforlabel2 <- max(maxlabel2def$median)
+
+reflabel2 <- maxlabel2def %>%
+  filter(median == maxforlabel2)
+
+plot1b <- if(proforma$Assignment == "Prebreeding") {
+  ggplot(prebreedingmedian, aes(x="", y=median))+
+    scale_y_continuous() + #(breaks=seq(0,400,100)) +
+    geom_boxplot() +
+    geom_point(
+      data=proforma,
+      aes(x="", y=median), 
+      colour="red", size=3
+    )+
+    
+     #stat_summary(fun = max, fun.max = length,
+      #         geom = "text", aes(label = ..ymax..), vjust = -1) +
+    theme_classic()+
+    theme(axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12))+
+    labs(x = "Roost Subset",
+         y = "Number of Bats in Roost") +
+        geom_label_repel(
+  data = reflabel2,   
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 1,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel2$refrange
+)
+} else {
+   ggplot(postbreedingmedian, aes(x="", y=median))+
+    scale_y_continuous() + #(breaks=seq(0,400,100)) +
+    geom_boxplot() +
+    geom_point(
+      data=proforma,
+      aes(x="", y=median), 
+      colour="red", size=3
+    )+
+   # stat_summary(fun = max, fun.max = length,
+    #           geom = "text", aes(label = ..ymax..), vjust = -1) +
+    theme_classic()+
+    theme(axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12))+
+    labs(x = "Roost Subset",
+         y = "Number of Bats in Roost (median)") +
+            geom_label_repel(
+  data = reflabel2,   
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 1,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel2$refrange
+)
+  
+}
+
+plot1a + plot1b
+
+```
+
+
+
+
+````{r fig.width=12, fig.height=12, fig.cap="A boxplot showing total count of bats in roosts per month across all years. Your roost is shown as the red dot.The numbers above the boxplots represent the sample size used from the database."}
+#Number of roosts across each month, can't do this for pre and post breeding because the way I work those values out cuts out the months (see above) only thing could do is plot months 1-6 or 7-12 but seems pointless when already in this graph.
+
+#need to use subset of all data for this graph but don't have months in current grouped data. Use mutate then think need to group by gridref and median and then delete duplicate rows
+
+#creates a dataset that keeps all data columns in
+mutation <- species %>%
+  dplyr::group_by(gridref, Species, year) %>%
+  dplyr::mutate(max = max(TotalCount)) %>%
+  dplyr::group_by(gridref, Species) %>%
+  dplyr::mutate(median = median(max)) %>%
+  dplyr::distinct(gridref, median, .keep_all=TRUE)
+
+########################################################################################
+
+#get a separate refrange for each month in the dataframe
+tally3 <- mutation %>%
+  group_by(monthtype) %>%
+  tally()
+tally3$refrange <- tally3$n
+tally3 <- tally3 %>%
+  select(!n)
+
+#doesn't seem to like month as a factor for this bit so changed to numeric for now, any issue with graph, might 
+#need to change to a factor later in code.
+maxforlabel3 <- mutation 
+
+#Get the max TotalCount for each month so the label will sit at the top
+reflabel3 <- maxforlabel3 %>%
+  group_by(monthtype) %>%
+  filter(TotalCount == max(TotalCount)) 
+
+#join together the two so the refrange is in the reflabel3 dataframe
+joined <- left_join(reflabel3, tally3, "monthtype")
+reflabel3 <- joined  
+
+ggplot(mutation, aes(x = monthtype, y = TotalCount)) + 
+  geom_boxplot(mutation, mapping = aes(fill = month))+
+  xlab("Month")+
+  ylab("Bat Total Count")+
+  scale_fill_grey(start=0.35, end = 1)+
+  scale_x_discrete(drop=TRUE)+
+  scale_y_continuous() + #(breaks=seq(0,400,100))+
+geom_point(
+    data=proforma,
+    aes(x = monthtype, y = TotalCount),
+    color="red", size=3)+
+  # stat_summary(fun = max, fun.max = length,
+   #            geom = "text", aes(label = ..ymax..), vjust = -1) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(linetype="blank"),
+        axis.line=element_line(size=0.5, colour="black",
+                               linetype="solid"),
+        axis.title.x=element_text(size=12),
+        axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5),
+        axis.title.y=element_text(size=12),
+        legend.position="none") +
+              geom_label_repel(
+  data = reflabel3,  
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 10,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel3$refrange
+)
+
+```
+
+
+
+
+```{r fig.width=12, fig.height=12, fig.cap="Boxplots of median bat counts in roosts split by structure type of the roost for all roosts in database. Your roost is shown as a red dot. Please note that counts tend to become more variable earlier and later in the season. The numbers alongside the boxplots represent the sample size used from the database."}
+#Plot a boxplot of roost count by structure
+allstructures <- subset(mutation, select = c(TotalCount, StructureType, year, month, day, median))
+
+allstructures <- filter(allstructures, StructureType !=  "")
+
+#get a separate refrange for each month in the dataframe
+
+#flips order that structures appear on graph so dwelling is at top and unknown at bottom
+allstructures$StructureType <- fct_rev(allstructures$StructureType)
+
+tally4 <- allstructures %>%
+  group_by(StructureType) %>%
+  tally()
+tally4$refrange <- tally4$n
+tally4 <- tally4 %>%
+  select(!n)
+
+#doesn't seem to like month as a factor for this bit so changed to numeric for now, any issue with graph, might 
+#need to change to a factor later in code.
+maxforlabel4 <- allstructures 
+#as.numeric(maxforlabel3$month)
+
+#Get the max TotalCount for each month so the label will sit at the top
+reflabel4 <- maxforlabel4 %>%
+  group_by(StructureType) %>%
+  filter(median == max(median)) 
+
+#join together the two so the refrange is in the reflabel3 dataframe
+joined <- left_join(reflabel4, tally4, "StructureType")
+reflabel4 <- joined
+
+#was getting 2 of some of the StructureTypes because medians were the same, stackoverflow suggested this code but I think I only actually need the second line because the doubles had the same median. If ever different, unhash first line. 
+#reflabel4 = reflabel4[order(reflabel4[, "StructureType"], -reflabel4[,"median"]),]
+reflabel4 = reflabel4[!duplicated(reflabel4$StructureType),]
+
+ggplot(allstructures, aes(x=StructureType, y=median)) + 
+  geom_boxplot(allstructures, mapping = aes(fill=StructureType))+
+  coord_flip() +
+  xlab("Structure")+
+  ylab("Bat Count Median")+
+  scale_fill_grey(start = 0.35, end = 1)+
+  scale_x_discrete(drop=TRUE) +
+  scale_y_continuous() +
+  geom_point(
+    data=proforma,
+    aes(x=StructureType, y=median), 
+    color="red", size=3
+  )+
+  # stat_summary(fun = max, fun.max = length,
+   #            geom = "text", aes(label = ..ymax..), vjust = -1) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(linetype="blank"),
+        axis.line=element_line(size=0.5, colour="black",
+                               linetype="solid"),
+        axis.title.x=element_text(size=12),
+        axis.text.x  = element_text(angle=90, face="italic",
+                                    size=12, hjust=1, vjust=0),
+        axis.text.y  = element_text(size=12),
+        axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5),
+        axis.title.y=element_text(size=12),
+        legend.position="none") +
+                geom_label_repel(
+  data = reflabel4,  
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 10,
+  direction = "x",
+  inherit.aes = TRUE,
+  label  = reflabel4$refrange
+)
+
+```
+
+
+
+``` {r}
+
+alldatapercentiles <- mediansubset
+alldatapercentiles$percentilesall <- ecdf(alldatapercentiles$median)(alldatapercentiles$median)*100
+
+alldatapercentiles$percentileswholeall <- lapply(alldatapercentiles$percentilesall, as.integer)
+
+q0 <- quantile(alldatapercentiles$median, c(.0))
+q1 <- quantile(alldatapercentiles$median, c(.20))
+q2 <- quantile(alldatapercentiles$median, c(.40))
+q3 <- quantile(alldatapercentiles$median, c(.60))
+q4 <- quantile(alldatapercentiles$median, c(.80))
+q5 <- quantile(alldatapercentiles$median, c(.95))
+
+#Create percentile rank column
+alldatapercentiles <- alldatapercentiles%>%
+  mutate(
+    percentilerankall = case_when(
+      median >= q0 & median < q1 ~ "low",
+      median >= q1 & median < q2 ~ "low/moderate",
+      median >= q2 & median < q3 ~ "moderate",
+      median >= q3 & median < q4 ~ "moderate/high",
+      median >= q4 & median < q5 ~ "high",
+      median >= q5 ~ "exceptional",
+  
+    )
+  )
+
+#Pull out percentile rank of proforma row from newmaster
+proforma$percentilesall <- ecdf(alldatapercentiles$median)(proforma$median)*100
+proforma$percentileswholeall <- lapply(proforma$percentilesall, as.integer)
+
+proforma <- proforma%>%
+  mutate(
+    percentilerankall = case_when(
+      median >= q0 & median < q1 ~ "low",
+      median >= q1 & median < q2 ~ "low/moderate",
+      median >= q2 & median < q3 ~ "moderate",
+      median >= q3 & median < q4 ~ "moderate/high",
+      median >= q4 & median < q5 ~ "high",
+      median >= q5 ~ "exceptional",
+  
+    )
+  )
+
+#make a column listing the refrange
+alldatapercentiles$refrange <- nrow(alldatapercentiles)
+
+if (proforma$Assignment == "Prebreeding") {
+  ps <- prebreedingmedian #ps = percentile subset
+} else {ps <- postbreedingmedian}
+
+#now do same for percentilesubset as did for one with all data to make percentiles and percentiles of new proforma df or row within proforma.
+
+ps$percentilessub <- ecdf(ps$median)(ps$median)*100
+ps$percentileswholesub <- lapply(ps$percentilessub, as.integer)
+
+#create the ranks, qs = quartile subset
+qs0 <- quantile(ps$median, c(.0))
+qs1 <- quantile(ps$median, c(.20))
+qs2 <- quantile(ps$median, c(.40))
+qs3 <- quantile(ps$median, c(.60))
+qs4 <- quantile(ps$median, c(.80))
+qs5 <- quantile(ps$median, c(.95))
+
+#Create percentile rank column
+ps <- ps%>%
+  mutate(
+    percentileranksub = case_when(
+      median >= qs0 & median < qs1 ~ "low",
+      median >= qs1 & median < qs2 ~ "low/moderate",
+      median >= qs2 & median < qs3 ~ "moderate",
+      median >= qs3 & median < qs4 ~ "moderate/high",
+      median >= qs4 & median < qs5 ~ "high",
+      median >= qs5 ~ "exceptional",
+    )
+  )
+
+ps$refrange <- nrow(ps)
+
+#create column with subset percentile of proforma, 
+proforma$percentilessub <- ecdf(ps$median)(proforma$median)*100
+proforma$percentileswholesub <- lapply(proforma$percentilessub, as.integer)
+
+#create subset rank for proforma
+proforma <- proforma%>%
+  mutate(
+    percentileranksub = case_when(
+      median >= qs0 & median < qs1 ~ "low",
+      median >= qs1 & median < qs2 ~ "low/moderate",
+      median >= qs2 & median < qs3 ~ "moderate",
+      median >= qs3 & median < qs4 ~ "moderate/high",
+      median >= qs4 & median < qs5 ~ "high",
+      median >= qs5 ~ "exceptional", 
+    )
+  )
+
+```
+\newpage
+
+# Section 2: Percentiles Analysis
+
+This analysis looks at the relative size of the ***`r proforma$Species`*** roost you recorded. We take your total count of *`r proforma$Species`* at the roost recorded and compare this to values in our reference database. We tell you what percentile your data falls at, and therefore what the relative size of that roost is.
+
+The number of *`r proforma$Species`* in a roost is ranked based on where it sits in relation to all other roosts in the database.
+
+* low (0-19th percentile)
+* low/moderate (20-39th percentile)
+* moderate (40-59th percentile)
+* moderate/high (60-79th percentile)
+* high (80-94th percentle)
+* exceptional (95th+ percentile)
+
+Please note that although percentiles are a useful guideline, they are not definitive and it is up to the user to interpret their ecological value.
+
+**All data:**
+Your roost is the **`r proforma$percentileswholeall`th percentile** when compared to the **`r unique(alldatapercentiles$refrange)`** ***`r proforma$Species`*** roosts in the dataset. This means your roost is ranked as having a **`r proforma$percentilerankall`** number of *`r proforma$Species`*.
+
+**Roost subset:**
+This takes into account breeding times in the same way that the subset of Figure 1 does. 
+
+Your roost is the **`r proforma$percentileswholesub`th percentile** when compared to the **`r unique(ps$refrange)`** ***`r proforma$Species`*** roosts in the dataset. This means your roost is ranked as having a **`r proforma$percentileranksub`** number of *`r proforma$Species`*.
+
+```{r fig.width=9, fig.height=9, fig.cap="A boxplot showing where your data lies in relation to all other roost data (left) and a boxplot showing where your data lies in relation to a subset of data based on the Assignment you gave your data. Values are the percentile values. The 20th, 40th, 60th, 80th and 95th percentiles are marked by dashed lines. The numbers above the boxplots represent the sample size used from the database."}
+
+reflabel5 <- alldatapercentiles %>%
+  filter(percentileswholeall == 100)
+
+plot2a <- ggplot(alldatapercentiles, aes(x="", y=percentilesall))+geom_boxplot()+
+  scale_y_continuous() + #(breaks=seq(0,100,20)) +
+  geom_hline(aes(yintercept=0), linetype="dashed",
+             color="#000000") +
+  geom_hline(aes(yintercept=20), linetype="dashed",
+             color="#0072B2") +
+  geom_hline(aes(yintercept=40), linetype="dashed",
+             color="#56B4E9") +
+  geom_hline(aes(yintercept=60), linetype="dashed",
+             color="#009E73") +
+  geom_hline(aes(yintercept=80), linetype="dashed",
+             color="#E69F00") +
+  geom_hline(aes(yintercept=95), linetype="dashed",
+             color="#EF2B0D")+
+  geom_point(
+    data=proforma,
+    aes(x="", y=percentilesall), 
+    color="red", size=5
+  )+
+    #currently stat-summary not working, squashes boxplot but can't find why
+       #stat_summary(fun = max, fun.max = length,
+        #       geom = "text", aes(label = ..ymax..), vjust = -1) +
+    theme_classic()+
+  theme(axis.title.x=element_text(size=14),
+        axis.title.y=element_text(size=14))+
+  labs(x = "All Roosts", 
+       y = "Percentile Rank") +
+    geom_label_repel(
+  data = reflabel5,   
+ # stat = "sum",
+ # position = "All Roosts",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 1,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel5$refrange
+)
+
+reflabel6 <- ps %>%
+  filter(percentileswholesub == 100)
+
+#plot of subset of percentiles from either pre- or post- breeding subset
+
+plot2b <- ggplot(ps, aes(x="", y=percentilessub))+geom_boxplot()+
+  scale_y_continuous() + #(breaks=seq(0,100,20)) +
+  geom_hline(aes(yintercept=0), linetype="dashed",
+             color="#000000") +
+  geom_hline(aes(yintercept=20), linetype="dashed",
+             color="#0072B2") +
+  geom_hline(aes(yintercept=40), linetype="dashed",
+             color="#56B4E9") +
+  geom_hline(aes(yintercept=60), linetype="dashed",
+             color="#009E73") +
+  geom_hline(aes(yintercept=80), linetype="dashed",
+             color="#E69F00") +
+   geom_hline(aes(yintercept=95), linetype="dashed",
+             color="#EF2B0D")+
+  geom_point(
+    data=proforma,
+    aes(x="", y=percentilessub), 
+    color="red", size=5
+  )+
+      # stat_summary(fun = max, fun.max = length,
+       #       geom = "text", aes(label = ..ymax..), vjust = -1) +
+  theme_classic()+
+  theme(axis.title.x=element_text(size=14),
+        axis.title.y=element_text(size=14))+
+  labs(x = "Roost Subset", 
+       y = "Percentile Rank") +
+      geom_label_repel(
+  data = reflabel6,   
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 0,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel6$refrange
+)
+
+plot2a + plot2b
+
+```
+\newpage
+
+# Section 3: Results from Sections 1 and 2 filtered by Structure Type
+
+The following section has subsetted data based on Structure Type. Graphs are provided for All Data and also a subset based on whether allocated to the Pre or Post breeding category.
+
+```{r, message=FALSE}
+
+#create a subset with all same StructureType as proforma
+structure <- filter(species, StructureType == proforma$StructureType)
+
+#subet data so have highest value per year and median across years as before
+structuremax <- structure %>%
+  dplyr::group_by(gridref, year) %>%
+  dplyr::summarise(max = max(TotalCount))
+
+structuremedian <- subsetalldata %>%
+  dplyr::group_by(gridref) %>%
+  dplyr::summarise(median = median(max))
+
+structuremediansubset <- structuremedian #now this is ready to use in graphs etc.
+
+### STRUCTURE PREDBREEDING SUBSET ###
+#filter so only months May - June 
+structureprebreeding <- structure %>%
+  filter(month == 5 | month == 6) #could also add: | Assignment == "Prebreeding")
+
+#Want peak count within year and median count across years
+#get highest count for each year
+structureprebreedingmax <- structureprebreeding %>%
+  dplyr::group_by(gridref, Species, year) %>%
+  dplyr::summarise(max = max(TotalCount))
+
+#take the median count for each location - if this stops working, probably because only one obs for prebreedingmax, last time seemed to be linked to the master saved on dropbox - if you replace this then it seems to work again.
+structureprebreedingmedian <- structureprebreedingmax %>%
+  dplyr::group_by(gridref, Species) %>%
+  dplyr::summarise(median = median(max))
+
+### STRUCTURE POSTBREEDING SUBSET ###
+#filter so only July to August
+structurepostbreeding <- structure %>%
+  filter(month == 7 | month == 8) #could also add: | Assignment == "Postbreeding")
+
+structurepostbreedingmax <- structurepostbreeding %>%
+  dplyr::group_by(gridref, Species, year) %>%
+  dplyr::summarise(max = max(TotalCount))
+
+structurepostbreedingmedian <- structurepostbreedingmax %>%
+  dplyr::group_by(gridref, Species) %>%
+  dplyr::summarise(median = median(max))
+```
+
+
+
+
+```{r fig.width=9, fig.height=9, fig.cap="A boxplot of where your roost count sits in relation to all those in the database (left) and a subset based on Assignment (right) of the same structure type. Your data is shown as the red dot."}
+#the graph to plot
+
+structuremediansubset$refrange <- nrow(structuremediansubset)
+maxforlabel7 <- max(structuremediansubset$median)
+reflabel7 <- structuremediansubset %>%
+  filter(median == maxforlabel7)
+
+plot1a <- ggplot(structuremediansubset, aes(x="", y=median))+geom_boxplot()+
+  scale_y_continuous() + #(breaks=seq(0,400,100)) +
+  geom_point(
+    data=proforma,
+    aes(x="", y=median), 
+    color="red", size=3
+  )+
+  
+ # stat_summary(fun = max, fun.max = length,
+  #             geom = "text", aes(label = ..ymax..), vjust = -1) +
+  theme_classic()+
+  theme(axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12))+
+  labs(x = "All Roosts",
+       y = "Bat Total Count") +
+      geom_label_repel(
+  data = reflabel7,   
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 10,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel7$refrange
+)
+
+if (proforma$Assignment == "Prebreeding") {
+  maxlabel8def <- structureprebreedingmedian
+} else if (proforma$Assignment == "Postbreeding") {
+  maxlabel8def <- structurepostbreedingmedian
+}
+
+maxlabel8def$refrange <- nrow(maxlabel2def)
+
+maxforlabel8 <- max(maxlabel8def$median)
+
+reflabel8 <- maxlabel8def %>%
+  filter(median == maxforlabel8)
+
+plot1b <- if(proforma$Assignment == "Prebreeding") {
+  ggplot(structureprebreedingmedian, aes(x="", y=median))+
+    scale_y_continuous() + #(breaks=seq(0,400,100)) +
+    geom_boxplot() +
+    geom_point(
+      data=proforma,
+      aes(x="", y=median), 
+      colour="red", size=3
+    )+
+    #stat_summary(fun = max, fun.max = length,
+     #            geom = "text", aes(label = ..ymax..), vjust = -1) +
+    theme_classic()+
+    theme(axis.title.x=element_text(size=12),
+          axis.title.y=element_text(size=12))+
+    labs(x = "Roost Subset",
+         y = "Number of Bats in Roost") +
+      geom_label_repel(
+  data = reflabel8,   
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 10,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel8$refrange
+)
+} else {
+  ggplot(structurepostbreedingmedian, aes(x="", y=median))+
+    scale_y_continuous() + #(breaks=seq(0,400,100)) +
+    geom_boxplot() +
+    geom_point(
+      data=proforma,
+      aes(x="", y=median), 
+      colour="red", size=3
+    )+
+  #  stat_summary(fun = max, fun.max = length,
+   #              geom = "text", aes(label = ..ymax..), vjust = -1) +
+    theme_classic()+
+    theme(axis.title.x=element_text(size=12),
+          axis.title.y=element_text(size=12))+
+    labs(x = "Roost Subset",
+         y = "Number of Bats in Roost (median)") +
+      geom_label_repel(
+  data = reflabel8,   
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 10,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel8$refrange
+)
+  
+}
+
+plot1a + plot1b
+
+
+```
+
+```{r fig.width=12, fig.height=12, fig.cap="A boxplot showing total count of bats in roosts per month across all years for your roost's Structure Type. Your roost is shown as the red dot."}
+
+structuremutation <- structure %>%
+  dplyr::group_by(gridref, Species, year) %>%
+  dplyr::mutate(max = max(TotalCount)) %>%
+  dplyr::group_by(gridref, Species) %>%
+  dplyr::mutate(median = median(max)) %>%
+  dplyr::distinct(gridref, median, .keep_all=TRUE)
+
+########################################################################################
+
+tally5 <- structuremutation %>%
+  group_by(monthtype) %>%
+  tally()
+tally5$refrange <- tally5$n
+tally5 <- tally5 %>%
+  select(!n)
+
+maxforlabel9 <- structuremutation
+
+reflabel9 <- maxforlabel9 %>%
+  group_by(monthtype) %>%
+  filter(TotalCount == max(TotalCount))
+
+joined9 <- left_join(reflabel9, tally5, "monthtype")
+reflabel9 <- joined9
+
+ggplot(structuremutation, aes(x = monthtype, y = TotalCount)) + 
+  geom_boxplot(structuremutation, mapping = aes(fill = month))+
+  xlab("Month")+
+  ylab("Bat Total Count")+
+  scale_fill_grey(start=0.35, end = 1)+
+  scale_x_discrete(drop=TRUE)+
+  scale_y_continuous() + #(breaks=seq(0,400,100))+
+  geom_point(
+    data=proforma,
+    aes(x=monthtype, y=TotalCount),
+    color="red", size=3)+
+  #stat_summary(fun = max, fun.max = length,
+   #            geom = "text", aes(label = ..ymax..), vjust = -1) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(linetype="blank"),
+        axis.line=element_line(size=0.5, colour="black",
+                               linetype="solid"),
+        axis.title.x=element_text(size=12),
+        axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5),
+        axis.title.y=element_text(size=12),
+        legend.position="none") +
+  geom_label_repel(
+  data = reflabel9,  
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 10,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel9$refrange
+)
+
+```
+
+
+```{r fig.width=9, fig.height=9, fig.cap="A boxplot showing where your data lies in relation to all other roost data (left) and a boxplot showing where your data lies in relation to a subset of data based on the Assignment you gave your data. Values are the percentile values. The 20th, 40th, 60th, 80th and 95th percentiles are marked by dashed lines. The numbers above the boxplots represent the sample size used for the database"}
+
+#########################################################################
+## Percentiles ##
+
+stralldatapercentiles <- structuremediansubset
+stralldatapercentiles$strpercentilesall <- ecdf(stralldatapercentiles$median)(stralldatapercentiles$median)*100
+
+stralldatapercentiles$strpercentileswholeall <- lapply(stralldatapercentiles$strpercentilesall, as.integer)
+
+strq0 <- quantile(stralldatapercentiles$median, c(.0))
+strq1 <- quantile(stralldatapercentiles$median, c(.20))
+strq2 <- quantile(stralldatapercentiles$median, c(.40))
+strq3 <- quantile(stralldatapercentiles$median, c(.60))
+strq4 <- quantile(stralldatapercentiles$median, c(.80))
+strq5 <- quantile(stralldatapercentiles$median, c(.95))
+
+#Create percentile rank column
+stralldatapercentiles <- stralldatapercentiles%>%
+  mutate(
+    strpercentilerankall = case_when(
+      median >= strq0 & median < strq1 ~ "low",
+      median >= strq1 & median < strq2 ~ "low/moderate",
+      median >= strq2 & median < strq3 ~ "moderate",
+      median >= strq3 & median < strq4 ~ "moderate/high",
+      median >= strq4 & median < strq5 ~ "high",
+      median >= strq5 ~ "exceptional",
+      
+    )
+  )
+
+#Pull out percentile rank of proforma row from newmaster
+proforma$strpercentilesall <- ecdf(stralldatapercentiles$median)(proforma$median)*100
+proforma$strpercentileswholeall <- lapply(proforma$strpercentilesall, as.integer)
+
+proforma <- proforma%>%
+  mutate(
+    strpercentilerankall = case_when(
+      median >= strq0 & median < strq1 ~ "low",
+      median >= strq1 & median < strq2 ~ "low/moderate",
+      median >= strq2 & median < strq3 ~ "moderate",
+      median >= strq3 & median < strq4 ~ "moderate/high",
+      median >= strq4 & median < strq5 ~ "high",
+      median >= strq5 ~ "exceptional",
+      
+    )
+  )
+
+#make a column listing the refrange
+stralldatapercentiles$refrange <- nrow(stralldatapercentiles)
+
+if (proforma$Assignment == "Prebreeding") {
+  strps <- structureprebreedingmedian #ps = percentile subset
+} else {strps <- structurepostbreedingmedian}
+
+#now do same for percentilesubset as did for one with all data to make percentiles and percentiles of new proforma df or row within proforma.
+
+strps$strpercentilessub <- ecdf(strps$median)(strps$median)*100
+strps$strpercentileswholesub <- lapply(strps$strpercentilessub, as.integer)
+
+#create the ranks, qs = quartile subset
+strqs0 <- quantile(strps$median, c(.0))
+strqs1 <- quantile(strps$median, c(.20))
+strqs2 <- quantile(strps$median, c(.40))
+strqs3 <- quantile(strps$median, c(.60))
+strqs4 <- quantile(strps$median, c(.80))
+strqs5 <- quantile(strps$median, c(.95))
+
+#Create percentile rank column
+strps <- strps%>%
+  mutate(
+    strpercentileranksub = case_when(
+      median >= strqs0 & median < strqs1 ~ "low",
+      median >= strqs1 & median < strqs2 ~ "low/moderate",
+      median >= strqs2 & median < strqs3 ~ "moderate",
+      median >= strqs3 & median < strqs4 ~ "moderate/high",
+      median >= strqs4 & median < strqs5 ~ "high",
+      median >= strqs5 ~ "exceptional",
+    )
+  )
+
+strps$refrange <- nrow(strps)
+
+#create column with subset percentile of proforma, 
+proforma$strpercentilessub <- ecdf(strps$median)(proforma$median)*100
+proforma$strpercentileswholesub <- lapply(proforma$strpercentilessub, as.integer)
+
+#create subset rank for proforma
+proforma <- proforma%>%
+  mutate(
+    percentileranksub = case_when(
+      median >= strqs0 & median < strqs1 ~ "low",
+      median >= strqs1 & median < strqs2 ~ "low/moderate",
+      median >= strqs2 & median < strqs3 ~ "moderate",
+      median >= strqs3 & median < strqs4 ~ "moderate/high",
+      median >= strqs4 & median < strqs5 ~ "high",
+      median >= strqs5 ~ "exceptional", 
+    )
+  )
+ #########
+
+## percentile graphs
+
+reflabel10 <- stralldatapercentiles %>%
+  filter(strpercentileswholeall == 100)
+
+plot3a <- ggplot(stralldatapercentiles, aes(x="", y=strpercentilesall))+geom_boxplot()+
+  scale_y_continuous() + #(breaks=seq(0,100,20)) +
+  geom_hline(aes(yintercept=0), linetype="dashed",
+             color="#000000") +
+  geom_hline(aes(yintercept=20), linetype="dashed",
+             color="#0072B2") +
+  geom_hline(aes(yintercept=40), linetype="dashed",
+             color="#56B4E9") +
+  geom_hline(aes(yintercept=60), linetype="dashed",
+             color="#009E73") +
+  geom_hline(aes(yintercept=80), linetype="dashed",
+             color="#E69F00") +
+  geom_hline(aes(yintercept=95), linetype="dashed",
+             color="#EF2B0D")+
+  geom_point(
+    data=proforma,
+    aes(x="", y=strpercentilesall), 
+    color="red", size=5
+  )+
+  #currently stat-summary not working, squashes boxplot but can't find why, may need to change way am showing up the numbers
+ # stat_summary(fun = max, fun.max = length,
+  #             geom = "text", aes(label = ..ymax..), vjust = -1) +
+  theme_classic()+
+  theme(axis.title.x=element_text(size=14),
+        axis.title.y=element_text(size=14))+
+  labs(x = "All Roosts", 
+       y = "Percentile Rank") +
+        geom_label_repel(
+  data = reflabel10,   
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 1,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel10$refrange
+)
+
+#plot of subset of percentiles from either pre- or post- breeding subset
+
+reflabel11 <- strps %>%
+  filter(strpercentileswholesub == 100)
+
+
+plot3b <- ggplot(strps, aes(x="", y=strpercentilessub))+geom_boxplot()+
+  scale_y_continuous() + #(breaks=seq(0,100,20)) +
+  geom_hline(aes(yintercept=0), linetype="dashed",
+             color="#000000") +
+  geom_hline(aes(yintercept=20), linetype="dashed",
+             color="#0072B2") +
+  geom_hline(aes(yintercept=40), linetype="dashed",
+             color="#56B4E9") +
+  geom_hline(aes(yintercept=60), linetype="dashed",
+             color="#009E73") +
+  geom_hline(aes(yintercept=80), linetype="dashed",
+             color="#E69F00") +
+  geom_hline(aes(yintercept=95), linetype="dashed",
+             color="#EF2B0D")+
+  geom_point(
+    data=proforma,
+    aes(x="", y=strpercentilessub), 
+    color="red", size=5
+  )+
+ # stat_summary(fun = max, fun.max = length,
+  #             geom = "text", aes(label = ..ymax..), vjust = -1) +
+  theme_classic()+
+  theme(axis.title.x=element_text(size=14),
+        axis.title.y=element_text(size=14))+
+  labs(x = "Roost Subset", 
+       y = "Percentile Rank") +
+  geom_label_repel(
+  data = reflabel11,   
+ # stat = "sum",
+ # position = "Roost Subset",
+  segment.alpha = 0,
+  label.size = 0.25,
+  nudge_x = 0,
+  nudge_y = 1,
+  direction = "y",
+  inherit.aes = TRUE,
+  label  = reflabel11$refrange
+)
+
+plot3a + plot3b
+
+```
+\newpage
+
+# Thank you for using the Ecobat Roost Analysis App. For any enquiries please email info@themammalsociety.org.
+
+Data used to generate this report includes contribution from the National Bat Monitoring Programme. The National Bat Monitoring Programme (NBMP) is run by the Bat Conservation Trust, in partnership with the Joint Nature Conservation Committee, and supported and steered by Natural England, Natural Resources Wales, Northern Ireland Environment Agency, and Scottish Natural Heritage. The NBMP is indebted to all volunteers who contribute data to the programme. Also with thanks to the University of Sussex for their support of this application.
